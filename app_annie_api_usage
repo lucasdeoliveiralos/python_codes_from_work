@@ -1,0 +1,146 @@
+--This notebook is used to interact with app annie API
+
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "d50c2046-ed9b-44d4-a793-2cfb9e7fc1ff",
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{'code': 401, 'message': 'UnAuthorizedUserError: 401 - authentication failed'}\n"
+     ]
+    }
+   ],
+   "source": [
+    "#código para segmentos de SWEB\n",
+    "\n",
+    "import requests\n",
+    "import pandas as pd\n",
+    "from pandas import json_normalize\n",
+    "import json\n",
+    "\n",
+    "        \n",
+    "#url='https://api.similarweb.com/v1/segment/traffic-and-engagement/describe?api_key=MY_API_KEY_HERE&userOnlySegments=false'\n",
+    "url='https://api.data.ai/v1.3/meta/apps/ios/categories'\n",
+    "response = requests.get(url, headers={'api-key':'MY_API_KEY_HERE'})\n",
+    "json_data= response.json()\n",
+    "print(json_data)\n",
+    "\n",
+    "#data = json_data['response']['segments']\n",
+    "#print(data[2]['creator_email'])\n",
+    "\n",
+    "    # Initialize lists to store the extracted data\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "55f6ec7f-43f1-4dd0-9471-d8998fefd697",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "creator_email=[]\n",
+    "segment_id=[]\n",
+    "segment_name=[]\n",
+    "creator_user_id=[]\n",
+    "domain=[]\n",
+    "last_updated_time=[]\n",
+    "\n",
+    "for seg_index in range(len(data)):\n",
+    "    creator_email.append(data[seg_index]['creator_email'])\n",
+    "    segment_id.append(data[seg_index]['segment_id'])\n",
+    "    segment_name.append(data[seg_index]['segment_name'])\n",
+    "    domain.append(data[seg_index]['domain'])\n",
+    "\n",
+    "# Create a DataFrame with the extracted data\n",
+    "df = pd.DataFrame({\n",
+    "    'creator_email': creator_email,\n",
+    "    'segment_id':segment_id,\n",
+    "    'segment_name':segment_name,\n",
+    "    'domain':domain\n",
+    "})\n",
+    "\n",
+    "# Exibir o DataFrame\n",
+    "print(df)\n",
+    "csv_file_path = 'segments_ids.csv'\n",
+    "df.to_csv(csv_file_path, index=False)\n",
+    "\n",
+    "print(f\"DataFrame saved to {csv_file_path}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "234b04e9-154d-4123-b45f-415877c04f06",
+   "metadata": {
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Erro na solicitação: Código de status 401\n"
+     ]
+    }
+   ],
+   "source": [
+    "import requests\n",
+    "\n",
+    "# URL da API\n",
+    "url = 'https://api.data.ai/v1.3/meta/apps/ios/categories'\n",
+    "\n",
+    "try:\n",
+    "    # Faz a solicitação GET à URL\n",
+    "    response = requests.get(url)\n",
+    "\n",
+    "    # Verifica se a solicitação foi bem-sucedida (código de status HTTP 200)\n",
+    "    if response.status_code == 200:\n",
+    "        # O conteúdo da resposta é um JSON\n",
+    "        data = response.json()\n",
+    "        print(\"Resultado da API:\")\n",
+    "        print(data)\n",
+    "    else:\n",
+    "        print(f\"Erro na solicitação: Código de status {response.status_code}\")\n",
+    "except Exception as e:\n",
+    "    print(f\"Ocorreu um erro ao fazer a solicitação: {e}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "863f6139-b05c-43a3-9006-e763a3011906",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.7"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

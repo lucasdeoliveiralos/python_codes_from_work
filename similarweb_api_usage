@@ -1,0 +1,213 @@
+--This code brings the usage of similarweb.com API's communication
+
+#GENERATING AUDIENCE DATA
+import time
+import requests
+import pandas as pd
+from pandas import json_normalize
+import json
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+#datas a serem requeridas:
+start_date='2021-01' #YYYY-MM
+end_date='2023-09'  #YYYY-MM
+
+start = datetime.strptime(start_date, "%Y-%m")
+end = datetime.strptime(end_date, "%Y-%m")
+
+def process_dataframe(input_df, company, vertical, state,platform):
+    # Create a new DataFrame with only the desired columns
+    processed_df = input_df[['date', 'visits', 'bounce_rate', 'pages_per_visit',
+                             'visit_duration', 'page_views', 'share', 'unique_visitors']].copy()
+    
+    # Add new columns with the provided inputs
+    processed_df['company'] = company
+    processed_df['vertical'] = vertical
+    processed_df['state'] = state
+    processed_df['platform'] = platform
+    
+    return processed_df
+
+def transform_dataframe(original_df, company, vertical, state, platform):
+    metric_name = original_df.columns[1]
+    transformed_df = pd.DataFrame()
+    transformed_df['date'] = original_df['date']
+    transformed_df['metric_name'] = metric_name
+    transformed_df['metric_value'] = original_df[metric_name]
+    transformed_df['company'] = company
+    transformed_df['vertical'] = vertical
+    transformed_df['state'] = state
+    transformed_df['platform'] = platform
+    return transformed_df
+
+def transform_dataframe_0(original_df, company, vertical, state, platform,metric_name):
+    transformed_df = pd.DataFrame()
+    transformed_df['date'] = original_df['date']
+    transformed_df['metric_name'] = metric_name
+    transformed_df['metric_value'] = original_df[original_df.columns[0]]
+    transformed_df['company'] = company
+    transformed_df['vertical'] = vertical
+    transformed_df['state'] = state
+    transformed_df['platform'] = platform
+    return transformed_df
+
+def add_data_to_dataframe(df, json_data,age,gender,company,vertical):
+    # Extrai os valores do JSON
+    start_date = json_data['meta']['request']['start_date']
+    share = json_data['share']
+    pages_per_visit = json_data['pages_per_visit']
+    bounce_rate = json_data['bounce_rate']
+    visit_duration = json_data['visit_duration']
+
+    # Adiciona os valores ao DataFrame
+    df = df.append({
+        'date': start_date,
+        'audience_share': share,
+        'pages_per_visit': pages_per_visit,
+        'bounce_rate': bounce_rate,
+        'visit_duration': visit_duration,
+        'age': age,
+        'gender': gender,
+        'company': company,
+        'vertical': vertical
+    }, ignore_index=True)
+    return df
+
+company_urls =[
+'olx.com.br', 
+'quintoandar.com.br',
+'chavesnamao.com.br',
+'icarros.com.br',
+'imovelweb.com.br',
+'kavak.com',
+'loft.com.br',
+'mobiauto.com.br',
+'vivareal.com.br',
+'webmotors.com.br',
+'zapimoveis.com.br',
+'casamineira.com.br', 
+'meucarronovo.com.br',
+'enjoei.com.br',
+'elo7.com.br',
+'mercadolivre.com.br',
+'shopee.com.br'
+]
+company_names =[
+    'olx',
+'quinto_andar',
+'chaves_na_mao',
+'icarros',
+'imovelweb',
+'kavak',
+'loft',
+'mobiauto',
+'vivareal',
+'webmotors',
+'zap',
+'casa_mineira',
+'meu_carro_novo',
+'enjoei',
+'elo7',
+'mercado_livre',
+'shopee'
+]
+vertical_names =[
+'FULL',
+'REAL_ESTATE',
+'FULL',
+'AUTOS',
+'REAL_ESTATE',
+'AUTOS',
+'REAL_ESTATE',
+'AUTOS',
+'REAL_ESTATE',
+'AUTOS',
+'REAL_ESTATE',
+'REAL_ESTATE',
+'AUTOS',
+'GOODS',
+'GOODS',
+'GOODS',
+'GOODS'
+]
+
+device_names =[
+'Total',
+'Desktop',
+'Mobile-web'
+]
+api_device_names =[
+'total-audience-interests',
+'audience-interests',
+'mobile-audience-interests'
+]
+company_map = dict(zip(company_urls, company_names)) #mapear uma lista na outra
+vertical_map = dict(zip(company_urls, vertical_names)) #mapear uma lista na outra
+device_map = dict(zip(device_names, api_device_names)) #mapear uma lista na outra
+
+# Replace with your actual API key
+API_KEY = "MY_API_KEY"
+# Headers with authorization
+headers = {
+    "Authorization": f"Bearer {API_KEY}"
+}
+
+#dataframe das métricas
+columns = ['dt','company_from','company_to', 'cross_visitors','vertical','device','month','year']
+metrics_df =pd.DataFrame(columns=columns)
+granularity='monthly'
+sleep_time=0.4
+#################################################################################################################
+while start <= end:
+    first_day = start.strftime("%Y-%m-01")
+    last_day = (start + relativedelta(day=31)).strftime("%Y-%m-%d")
+                                                    ####################
+                                                    ###Loop de coleta###
+    for company_url in company_urls:                ####################
+        company_from=company_map.get(company_url)
+        vertical=vertical_map.get(company_url)
+        for device in device_names:
+           
+            #total
+            url='https://api.similarweb.com/v4/website/'+company_url+'/'+device_map.get(device)+'/also-visited?api_key=MY_API_KEY&start_date='+first_day+'&end_date='+last_day+'&country=br&main_domain_only=false&format=json' 
+            # Make the API request
+            response = requests.get(url, headers={'api-key':MY_API_KEY'})
+            # Check if the request was successful
+            if response.status_code == 200:
+                data= response.json()
+                # Process the data as needed
+                print('Data for '+company_from+'/'+device+'/'+str(start)+' overlap processed successfully!')
+            else:
+                print('API request failed for '+company_from+' :', response.status_code)
+                
+            # Extract 'overlap' and 'domain' pairs
+            overlap_list = [record['overlap'] for record in data['records']]
+            domain_list = [record['domain'] for record in data['records']]
+            date = data['meta']['request']['start_date']
+
+            # Create a DataFrame with three columns
+            df = pd.DataFrame({'cross_visitors': overlap_list, 'company_to': domain_list, 'dt': [date] * len(overlap_list)})
+            df['dt'] = pd.to_datetime(df['dt'])
+            df['year'] = df['dt'].dt.year.astype('int32')
+            df['month'] = df['dt'].dt.month.astype('int32')
+            df['company_from'] = company_from
+            df['vertical'] = vertical
+            df['device'] = device
+            metrics_df=pd.concat([metrics_df, df], ignore_index=True) # apenda novos dados
+            time.sleep(sleep_time)
+    start = start + relativedelta(months=1)
+df=metrics_df
+for col in df.columns:
+    if df[col].dtype == 'object':
+        df = df.astype({col:'string'})
+for col in df.columns:
+    if df[col].dtype == 'float64':
+        df = df.astype({col:'float32'})
+
+metrics_df=df
+metrics_df['month'] = metrics_df['month'].astype('int32')
+metrics_df['year'] = metrics_df['year'].astype('int32')
+
+# Exibe o DataFrame resultante
+print(metrics_df)

@@ -1,0 +1,293 @@
+--This code reads and writes content from/to google sheets
+# TOTAL LISTINGS
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
+import calendar
+import pandas as pd
+from openpyxl import load_workbook
+import olx_datalake
+
+# Convertendo a data inicial e final para datetime
+start_date_str = '2023-06-01'
+start_date = pd.to_datetime(start_date_str)
+
+# Converte as datas para objetos datetime
+start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+start_date = start_date.strftime('%Y-%m-%d')
+#conversoes necessarias:
+year_str, month_str, day_str = start_date.split('-')
+
+# Convert year_str and month_str to integers
+year = int(year_str)
+month = int(month_str)
+
+#chamada do datalake_olx
+dl = olx_datalake.DataLake()
+
+
+print("Olx_datalake configurado")
+
+#Total listings-olx
+total_olx = dl.sql("""
+    with 
+
+cl as (
+SELECT event_date 
+FROM ods.calendar
+where cast(array_join(array[year(event_date), month(event_date), day(event_date)], '-') as date) between date('"""+start_date+"""') and date('"""+start_date+"""')+ interval '4' month
+
+)
+
+,listings AS 
+(
+SELECT DISTINCT
+    CAST(cl.event_date AS DATE) AS data,
+    a.list_id_nk,
+    ad.account_id_fk
+FROM olx_listing.ad_inventory a
+JOIN  cl ON DATE (a.start_date) <= DATE(cl.event_date) AND coalesce(DATE(a.end_date),current_date) >= DATE(cl.event_date)
+left join ods.ad ad on a.list_id_nk = ad.list_id_nk
+LEFT JOIN ods.dm_category ca ON ad.category_id_fk=ca.category_id_pk 
+WHERE category_id_fk in (121, 124, 125, 2, 3, 79, 44, 86, 80, 40)
+)
+
+,daily_ads as (
+SELECT 
+    data,
+    COUNT(distinct list_id_nk) AS listings
+FROM listings
+GROUP BY 1
+)
+
+select 
+  date_trunc('month', data) as publi_month,
+  avg(listings) as olx
+from daily_ads
+group by 1
+order by 1
+""")
+
+#Total listings-Shift
+total_shift = dl.sql("""
+    with
+
+base as (
+select
+count(distinct id) as listings,
+dt as publi_date,
+date_trunc('month',dt) as publi_month,
+case when link like '%casamineira.com%' then 'Casa Mineira'
+     when link like '%loft.com%' then 'Loft'
+     when link like '%imovelweb.com%' then 'Imovelweb'
+     when link like '%quintoandar.com%' then 'Quinto Andar' end as player
+from strategy.shift
+where dt >= date('"""+start_date+"""')
+group by 2,3,4
+),
+
+mensal as (
+select
+publi_month,
+player,
+avg(listings) as listings
+from base
+group by 1,2
+)
+select
+a.publi_month,
+a.listings as quintoandar,
+b.listings as loft,
+c.listings as imovelweb,
+d.listings as casamineira
+from (select * from mensal where player = 'Quinto Andar') as a
+left join (select * from mensal where player = 'Loft') as b on a.publi_month=b.publi_month
+left join (select * from mensal where player = 'Imovelweb') as c on a.publi_month=c.publi_month
+left join (select * from mensal where player = 'Casa Mineira') as d on a.publi_month=d.publi_month
+order by 1
+
+""")
+
+#Total listings-zap/vr
+total_zap = dl.sql("""
+    with
+aux as (
+select dt,
+       date_trunc('month',dt) as mes,
+       count(distinct id) as n_listing
+        from silver_normalized_listings.listings_daily
+        where True
+        and dt >=date('"""+start_date+"""')
+        and is_active = true
+        and is_zap_portal = true
+        
+        group by 1,2--,2,3,4,5)
+        ),
+   final as (     
+        select
+        mes as publi_month,
+        avg(n_listing) as zap
+        from aux
+        group by 1
+        )
+select * from final
+order by publi_month
+""")
+
+total_vr = dl.sql("""
+    with
+aux as (
+select dt,
+       date_trunc('month',dt) as mes,
+       count(distinct id) as n_listing
+        from silver_normalized_listings.listings_daily
+        where True
+        and dt >=date('"""+start_date+"""')
+        and is_active = true
+        and is_vr_portal = true
+        
+        group by 1,2--,2,3,4,5)
+        ),
+   final as (     
+        select
+        mes as publi_month,
+        avg(n_listing) as vivareal
+        from aux
+        group by 1
+        )
+select * from final
+order by publi_month
+
+""")
+
+result = total_shift.merge(total_zap, on='publi_month').merge(total_vr, on='publi_month').merge(total_olx, on='publi_month')
+
+# Exibindo o resultado
+print(result_total)
+
+#total listings WRITE
+from datetime import datetime
+import calendar
+
+def encontrar_coluna_por_data(credenciais_json, nome_planilha, nome_aba, data_procurada):
+
+    # Abra a planilha e a aba
+    planilha = client.open(nome_planilha)
+    aba = planilha.worksheet(nome_aba)
+
+    # Obtenha os valores da linha 10 (assumindo que as datas estão na linha 10)
+    valores_linha_10 = aba.row_values(10)
+
+    # Itere pelos valores para encontrar a coluna com a data procurada
+    for coluna, data in enumerate(valores_linha_10, start=1):
+        if data == data_procurada:
+            return coluna
+
+    return None  # Retorna None se a data não for encontrada
+
+def converter_data(mon_yy):
+    # Converte a data no formato "Mon/YY" para "01/MM/YY"
+    mon_yy = "01/" + mon_yy
+    # Converte a data para o formato "YYYY-MM-01 00:00:00"
+    data_formatada = pd.to_datetime(mon_yy, format="%d/%b/%y")
+    return data_formatada
+
+def dataf_max_date(df):
+    return df['publi_month'].max()
+
+def column_number(col_str):
+    # Converte uma string de coluna em seu número inteiro correspondente (A=1, B=2, ..., Z=26, AA=27, AB=28, ...)
+    num = 0
+    for c in col_str:
+        num = num * 26 + ord(c) - ord('A') + 1
+    return num
+
+def column_string(column_num):
+    # Converte um número de coluna em sua representação de string correspondente (1=A, 2=B, ..., 26=Z, 27=AA, 28=AB, ...)
+    result = ""
+    while column_num > 0:
+        column_num, remainder = divmod(column_num - 1, 26)
+        result = chr(ord('A') + remainder) + result
+    return result
+
+
+def preencher_datas_na_planilha(credenciais_json, nome_planilha, nome_aba, df):
+    # Carregue as credenciais do Google Sheets
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name(credenciais_json, scope)
+    client = gspread.authorize(creds)
+
+    # Abra a planilha e a aba
+    planilha = client.open(nome_planilha)
+    aba = planilha.worksheet(nome_aba)
+
+    # Encontre a maior data no dataframe
+    data_maxima_dataframe = dataf_max_date(df)
+    # Comece da primeira célula na linha 10
+    coluna_atual = 'AM'
+    celula_atual = aba.acell(f'{coluna_atual}10').value
+    celula_atual=converter_data(celula_atual)
+    while celula_atual<data_maxima_dataframe:
+        # Obtenha o valor da célula atual e da próxima célula
+        print('loop iter')
+        celula_atual = aba.acell(f'{coluna_atual}10').value
+        celula_atual=converter_data(celula_atual)
+        coluna_proxima_numero = column_number(coluna_atual) + 1
+        coluna_proxima = column_string(coluna_proxima_numero)
+        celula_proxima = aba.acell(f'{coluna_proxima}10').value
+
+        # Verifique se a próxima célula está preenchida
+        if not celula_proxima:
+            # Se a célula atual estiver vazia, preencha com a data um mês à frente
+            nova_data =celula_atual+ timedelta(days=31)
+            nova_data = nova_data.replace(day=1)  # Define o dia para 1 para garantir que seja o primeiro dia do mês
+            data_atual_str = nova_data.strftime('%b/%y')
+            aba.update_acell(f'{coluna_proxima}10', data_atual_str)
+            # Avance para a próxima coluna
+        coluna_atual = coluna_proxima
+            
+
+    print('Datas atualizadas com sucesso no Google Sheets.')
+
+# Defina o nome do seu arquivo JSON de credenciais do Google
+credenciais_json = 'FILE_WITH_GOOGLE_CREDENTIALS_JSON.json'
+
+# Defina o nome do arquivo do Google Sheets e a aba
+nome_planilha = 'Q2-23 Competition KPI collection file - Brasil'
+nome_aba = '(datalake) Listings RE'
+
+# Carregue as credenciais do Google Sheets
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_name(credenciais_json, scope)
+client = gspread.authorize(creds)
+
+# Abra a planilha e a aba
+planilha = client.open(nome_planilha)
+aba = planilha.worksheet(nome_aba)
+
+# Carregue o dataframe
+df = result_total  
+preencher_datas_na_planilha(credenciais_json, nome_planilha, nome_aba, df)
+
+# Preencha as células com os dados do dataframe
+colunas_players = df.columns[df.columns != 'publi_month']  # Obtém as colunas dos players
+for index, row in df.iterrows():
+    data = row['publi_month'].strftime('%b/%y')
+    print(data)
+
+    # Encontre a coluna correspondente à data
+    coluna_data =encontrar_coluna_por_data(credenciais_json, nome_planilha, nome_aba, data)
+
+    # Atualize as células com os valores dos players
+    for player in colunas_players:
+        valor = row[player]
+        coluna_a = aba.col_values(1)
+        coluna_a=coluna_a[10:17]
+        print(coluna_a)
+        for linha, site in enumerate(coluna_a, start=11):
+            if site.lower() == player.lower():
+                linha_player=linha
+                print(linha_player)
+        aba.update_acell(f'{column_string(coluna_data)}{linha_player}', valor)
+
+print('Dados atualizados com sucesso no Google Sheets.')

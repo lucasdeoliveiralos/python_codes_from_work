@@ -1,0 +1,376 @@
+--This code reads content from google sheets
+
+import gspread
+import pandas as pd
+from oauth2client.service_account import ServiceAccountCredentials
+import numpy as np
+
+ano_refs='2023'
+mes_refs='04'
+
+def convert_year_month_to_number(year, month):
+    year = int(year)
+    month = int(month)
+    base_year = 2021
+    base_month = 12
+    difference_in_months = (year - base_year) * 12 + (month - base_month)
+    return difference_in_months + 26  # Adicionar 1 para ajustar a contagem
+def qual_quarter(input_string):
+    try:
+        input_int = int(input_string)
+        if 1 <= input_int <= 3:
+            return '1'
+        elif 4 <= input_int <= 6:
+            return '2'
+        elif 7 <= input_int <= 9:
+            return '3'
+        elif 10 <= input_int <= 12:
+            return '4'
+        else:
+            return 'Número fora do intervalo especificado'
+    except ValueError:
+        return 'Entrada inválida, insira um número inteiro'
+
+onda= 'Onda_'+ str(convert_year_month_to_number(ano_refs, mes_refs)) 
+Q='Q'+ qual_quarter(mes_refs)
+ano = int(ano_refs)
+mes = int(mes_refs)
+g_sheet_name = 'Onda '+str(convert_year_month_to_number(ano_refs, mes_refs))+' - '+mes_refs+'/'+ano_refs  #  Google Sheets name
+r_sheet_name = 'Imoveis - '+Q+'/'+str(ano-2000)  #  Google Sheets name
+a_sheet_name = 'Autos - '+Q+'/'+str(ano-2000)  #  Google Sheets name
+
+                                      ##### DEFINIÇÃO DE FUNÇÕES#####
+
+
+#lê o conteudo da gsheets
+def read_sheet_into_dataframe(credentials_filename, sheet_name, tab_name):
+    # Load credentials and authenticate
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets",
+             "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_filename, scope)
+    gc = gspread.authorize(creds)
+    
+    # Open the specified sheet and tab
+    sheet = gc.open(sheet_name)
+    worksheet = sheet.worksheet(tab_name)
+
+    # Get all values from the tab
+    values = worksheet.get_all_values()
+
+    # Create a Pandas DataFrame
+    df = pd.DataFrame(values[1:], columns=values[0])
+
+    return df
+
+#preenche as celulas mergeadas com conteudo da principal
+def process_row(df, row_index):
+    row = df.iloc[row_index]
+    for i in range(0, len(row)):
+        term=row[i]
+        if term.startswith("W")  and term[1].isdigit():
+            row[i] = "Total"
+    for i in range(2, len(row)):
+        if (pd.isna(row[i]) or row[i]=='') and (pd.notna(row[i - 1]) or row[i - 1]!=''):
+            row[i] = row[i - 1]
+    df.iloc[row_index] = row
+    return df
+
+#Retira as linhas indesejadas do df
+def preprocess_dataframe(df):
+    # Find the row index where "BASE NP: (Total)" is present
+    base_np_row = df[df.iloc[:, 0] == "BASE NP: (Total)"].index[0]
+
+    # Keep the two rows above "BASE NP: (Total)" and remove all rows above it
+    df = df.iloc[base_np_row - 2:]
+
+    # Find the row index where "Média (IMP)" is present
+    media_row = None
+    # Try to find row index where either "Média (IMP)" or "*IM" is written
+    media_row_candidates = df[(df.iloc[:, 0] == "Média (IMP)") | (df.iloc[:, 0] == "*IM")|(df.iloc[:, 0] == "Média (Índice de Multiplicidade)")].index
+    if not media_row_candidates.empty:
+        media_row = media_row_candidates[0]
+
+    # If not found, try to find the first row index where cell in column 2 is empty
+    if media_row is None:
+        empty_cell_row_candidates = df[df.iloc[:, 1].isin(['', None])].index
+        if not empty_cell_row_candidates.empty:
+            media_row = empty_cell_row_candidates[0]
+
+    # Remove rows below "Média (IMP)" including the row itself
+    df = df[:media_row-2]
+    
+    #Preencher as celulas mergeadas:
+    df=process_row(df,0)
+    
+    return df
+
+#Retira as linhas indesejadas do df(versão para tabela com só uma pergunta)
+def preprocess_dataframe_v2(df):
+    # Find the row index where "BASE NP: (Total)" is present
+    base_np_row = df[df.iloc[:, 0] == "BASE NP: (Total)"].index[0]
+
+    # Keep one row above "BASE NP: (Total)" and remove all rows above it
+    df = df.iloc[base_np_row - 1:]
+
+    # Find the row index where "Média (IMP)" is present
+    media_row = None
+    # Try to find row index where either "Média (IMP)" or "*IM" is written
+    media_row_candidates = df[(df.iloc[:, 0] == "Média (IMP)") | (df.iloc[:, 0] == "*IM")|(df.iloc[:, 0] == "Média (Índice de Multiplicidade)")].index
+    if not media_row_candidates.empty:
+        media_row = media_row_candidates[0]
+
+    # If not found, try to find the first row index where cell in column 2 is empty
+    if media_row is None:
+        empty_cell_row_candidates = df[df.iloc[:, 1].isin(['', None])].index
+        if not empty_cell_row_candidates.empty:
+            media_row = empty_cell_row_candidates[0]
+
+    # Remove rows below "Média (IMP)" including the row itself
+    df = df[:media_row-2]
+    
+    return df
+
+def get_first(input_string):
+    # Encontra o índice do primeiro espaço na string
+    first_space_index = input_string.find(' ')
+    
+    # Pega a primeira parte da string até o primeiro espaço
+    if first_space_index != -1:
+        first_part = input_string[:first_space_index]
+    else:
+        first_part = input_string
+    
+    return first_part
+
+def get_later(input_string):
+    # Encontra o índice do primeiro espaço na string
+    first_space_index = input_string.find(' ')
+    
+    # Pega a parte da string após o primeiro espaço
+    if first_space_index != -1:
+        after_first_space = input_string[first_space_index + 1:]
+    else:
+        after_first_space = input_string
+    
+    return after_first_space
+
+#Cria o dataframe final df(versão para tabela com só uma pergunta)
+def create_new_dataframe_v2(df, ano, mes, vertical, onda_ou_q, user,pergunta,pergunta_name): 
+    # Encontrar a célula de referência "BASE NP: (Total)"
+  
+    reference_row = df[df.iloc[:, 0] == "BASE NP: (Total)"].index[0]
+    reference_col = 1
+
+    # Criar uma nova lista de registros para o novo dataframe
+    records = []
+    for row in range(reference_row - 1, df.shape[0]):
+        for col in range(reference_col + 1, df.shape[1]):
+            player = df.iat[row, 0]
+            tamanho_base = df.iat[1, col]
+            if df.iat[row, col]=='':
+                metrica=float(0)
+            else:
+                metrica = df.iat[row, col]
+            quebra = df.iat[0, col]
+            record = {
+                'year': ano,
+                'month': mes,
+                'vertical': vertical,
+                'onda_ou_q': onda_ou_q,
+                'player': player,
+                'pergunta': pergunta,
+                'pergunta_name': pergunta_name,
+                'tamanho_base': int(tamanho_base),
+                'metrica': np.float32(metrica),
+                'quebra': quebra,
+                'user': str(user)
+            }
+            records.append(record)
+
+    # Criar o novo dataframe a partir dos registros
+    new_df = pd.DataFrame(records)
+    return new_df
+
+def create_new_dataframe(df, ano, mes, vertical, onda_ou_q, user):
+    # Encontrar a célula de referência "BASE NP: (Total)"
+  
+    reference_row = df[df.iloc[:, 0] == "BASE NP: (Total)"].index[0]
+    reference_col = 1
+
+    # Criar uma nova lista de registros para o novo dataframe
+    records = []
+    for row in range(reference_row -1, df.shape[0]):
+        for col in range(reference_col + 1, df.shape[1]):
+            player = df.iat[row, 0]
+            pergunta = get_first(df.iat[1, col])
+            pergunta_name= get_later(df.iat[1, col])
+            tamanho_base = df.iat[2, col]
+            if df.iat[row, col]=='':
+                metrica=float(0)
+            else:
+                metrica = df.iat[row, col]
+            quebra = df.iat[0, col]
+            record = {
+                'year': ano,
+                'month': mes,
+                'vertical': vertical,
+                'onda_ou_q': onda_ou_q,
+                'player': player,
+                'pergunta': pergunta,
+                'pergunta_name': pergunta_name,
+                'tamanho_base': int(tamanho_base),
+                'metrica': np.float32(metrica),
+                'quebra': quebra,
+                'user': str(user)
+            }
+            records.append(record)
+
+    # Criar o novo dataframe a partir dos registros
+    new_df = pd.DataFrame(records)
+    return new_df
+
+
+# Provide the required credentials
+credentials_filename = 'CREDENTIALS_FILE_NAME.json'  # Replace with your JSON credentials file name
+
+
+
+
+
+
+
+
+                                      ##### DEFINIÇÃO DATAFRAME GOODS#####
+#ABA T27
+vertical = 'Goods' # Goods , Autos ou Real Estate
+user = 'buyer' # buyer ou seller
+tab_name = 'T27'  # tab name
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, g_sheet_name, tab_name)
+
+# Preprocess the DataFrame
+pdf = preprocess_dataframe(dataframe)
+
+final_dataframe = create_new_dataframe(pdf, ano, mes, vertical, onda, user)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+goods_T27_df=final_dataframe
+
+
+
+#ABA T39
+vertical = 'Goods' # Goods , Autos ou Real Estate
+user = 'seller' # buyer ou seller
+tab_name = 'T39'  # tab name
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, g_sheet_name, tab_name)
+# Preprocess the DataFrame
+pdf = preprocess_dataframe(dataframe)
+
+final_dataframe = create_new_dataframe(pdf, ano, mes, vertical, onda, user)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+goods_T39_df=final_dataframe
+
+
+#ABA T15
+pergunta='p8'
+pergunta_name='Conhecimento Espontâneo'
+vertical = 'Goods' # Goods , Autos ou Real Estate
+user = 'buyer' # buyer ou seller
+tab_name = 'T15'  # tab name
+
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, g_sheet_name, tab_name)
+# Preprocess the DataFrame
+pdf = preprocess_dataframe_v2(dataframe)
+
+final_dataframe = create_new_dataframe_v2(pdf, ano, mes, vertical, onda, user,pergunta,pergunta_name)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+goods_T15_df=final_dataframe
+
+
+goods_df = pd.concat([goods_T39_df, goods_T27_df,goods_T15_df], ignore_index=True)
+#print(goods_df)
+print(f"Goods Dataframe Processed Successfully!")
+# Save the preprocessed DataFrame to a CSV file
+#csv_filename = 'bht_goods_tomo_38.csv'
+#final_dataframe.to_csv(csv_filename, index=False)
+
+                                      ##### DEFINIÇÃO DATAFRAME IMÓVEIS#####
+#ABA T31
+vertical = 'Real Estate' # Goods , Autos ou Real Estate
+user = 'buyer_and_seller' # buyer ou seller ou buyer_and_seller
+tab_name = 'T31'  # tab name ---> T30 de 2022 pra baixo
+
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, r_sheet_name, tab_name)
+# Preprocess the DataFrame
+pdf = preprocess_dataframe(dataframe)
+
+final_dataframe = create_new_dataframe(pdf, ano, mes, vertical, Q, user)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+realestate_T31_df=final_dataframe
+realestate_df = realestate_T31_df
+print(f"Real Estate Dataframe Processed Successfully!")
+
+
+
+
+
+                                      ##### DEFINIÇÃO DATAFRAME AUTOS#####
+#ABA T19
+vertical = 'Autos' # Goods , Autos ou Real Estate
+user = 'buyer_and_seller' # buyer ou seller ou buyer_and_seller
+tab_name = 'T19'  # tab name --> T20 de 2022 pra baixo
+
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, a_sheet_name, tab_name)
+# Preprocess the DataFrame
+pdf = preprocess_dataframe(dataframe)
+
+final_dataframe = create_new_dataframe(pdf, ano, mes, vertical,Q, user)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+autos_T19_df=final_dataframe
+
+
+#ABA T29
+vertical = 'Autos' # Goods , Autos ou Real Estate
+user = 'buyer_and_seller' # buyer ou seller ou buyer_and_seller
+tab_name = 'T29'  # tab name
+
+
+# Read the content and create the DataFrame
+dataframe = read_sheet_into_dataframe(credentials_filename, a_sheet_name, tab_name)
+# Preprocess the DataFrame
+pdf = preprocess_dataframe(dataframe)
+
+final_dataframe = create_new_dataframe(pdf, ano, mes, vertical,Q, user)
+final_dataframe['dt']= pd.to_datetime(ano_refs+'-'+mes_refs+'-01', format='%Y-%m-%d')
+for col in final_dataframe.columns:
+    if final_dataframe[col].dtype == 'object':
+        final_dataframe = final_dataframe.astype({col:'string'})
+autos_T29_df=final_dataframe
+
+autos_df = pd.concat([autos_T19_df, autos_T29_df], ignore_index=True)
+print(f"Autos Dataframe Processed Successfully!")
+
+month_df =pd.concat([autos_df, realestate_df, goods_df], ignore_index=True)
